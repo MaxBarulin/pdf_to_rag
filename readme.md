@@ -82,12 +82,13 @@ sentence-transformers
 pdfplumber
 python-dotenv
 langchain-huggingface
+markdown
 ```
 
 Если файла `requirements.txt` нет, установите зависимости вручную:
 
 ```bash
-pip install langchain langchain-community langchain-google-genai google-generativeai faiss-cpu sentence-transformers pdfplumber python-dotenv langchain-huggingface
+pip install langchain langchain-community langchain-google-genai google-generativeai faiss-cpu sentence-transformers pdfplumber python-dotenv langchain-huggingface markdown
 ```
 
 ### 4. Настройка API-ключа
