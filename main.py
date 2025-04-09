@@ -10,6 +10,29 @@ from langchain.chains import RetrievalQA
 import markdown
 
 
+def wrap_text(text, max_length=80):
+    """
+    Разбивает текст на строки длиной не более max_length символов,
+    добавляя перенос строки на месте ближайшего пробела.
+    """
+    words = text.split(' ')
+    lines = []
+    current_line = []
+
+    for word in words:
+        # Если добавление нового слова превышает лимит, завершаем текущую строку
+        if sum(len(w) for w in current_line) + len(word) + len(current_line) > max_length:
+            lines.append(' '.join(current_line))
+            current_line = []
+        current_line.append(word)
+
+    # Добавляем оставшиеся слова
+    if current_line:
+        lines.append(' '.join(current_line))
+
+    return '\n'.join(lines)
+
+
 # === Шаг 1: Извлечение таблиц и текста из PDF ===
 def extract_tables_as_dicts(pdf_path):
     tables_as_dicts = []
@@ -161,6 +184,8 @@ def main(pdf_path, api_key):
 
                 # Если нужно, преобразуем Markdown в HTML
                 result = markdown.markdown(result)
+
+                result = wrap_text(result, max_length=80)
 
                 # Выводим только текстовый результат
                 print(f"Система: {result}")
