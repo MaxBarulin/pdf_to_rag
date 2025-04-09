@@ -1,4 +1,3 @@
-# Импорты
 import os
 
 import pdfplumber
@@ -8,6 +7,7 @@ from langchain_community.vectorstores import FAISS
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAI
 from langchain.chains import RetrievalQA
+import markdown
 
 
 # === Шаг 1: Извлечение таблиц и текста из PDF ===
@@ -151,7 +151,21 @@ def main(pdf_path, api_key):
         # Генерация ответа
         try:
             response = qa_chain.invoke(query)
-            print(f"Система: {response}")
+
+            # Форматируем ответ
+            if isinstance(response, dict) and "result" in response:
+                result = response["result"]
+
+                # Заменяем \n на реальные переносы строк
+                result = result.replace("\\n", "\n")
+
+                # Если нужно, преобразуем Markdown в HTML
+                result = markdown.markdown(result)
+
+                # Выводим только текстовый результат
+                print(f"Система: {result}")
+            else:
+                print(f"Система: Не удалось получить ответ.")
         except Exception as e:
             print(f"Система: Произошла ошибка при обработке запроса: {e}")
 
