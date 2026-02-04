@@ -1,209 +1,166 @@
-import os
+"""
+RAG-система с гибридным поиском (FAISS + BM25).
 
-import pdfplumber
-from dotenv import load_dotenv
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_community.vectorstores import FAISS
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_google_genai import GoogleGenerativeAI
-from langchain.chains import RetrievalQA
-import markdown
+Использует:
+- Эмбеддинги: Qwen3-Embedding-0.6B (локально)
+- Поиск: Гибридный (векторный + ключевой)
+- LLM: PolzaAI или KoboldCPP
+"""
+import sys
+
+from src.config import load_config
+from src.embeddings import QwenEmbeddings
+from src.document_loader import load_markdown_file, split_into_chunks
+from src.vector_store import get_or_create_vector_store
+from src.rag_chain import RAGChain
+from src.llm_providers.polza import PolzaProvider
+from src.llm_providers.kobold import KoboldProvider
 
 
-def wrap_text(text, max_length=80):
-    """
-    Разбивает текст на строки длиной не более max_length символов,
-    добавляя перенос строки на месте ближайшего пробела.
-    """
+def create_llm_provider(config):
+    """Создаёт LLM провайдер на основе конфигурации."""
+    if config.llm_provider == "kobold":
+        print(f"Используем KoboldCPP: {config.kobold_base_url}")
+        return KoboldProvider(base_url=config.kobold_base_url)
+    else:
+        print(f"Используем PolzaAI: {config.polza_model}")
+        return PolzaProvider(
+            api_key=config.polza_api_key,
+            base_url=config.polza_base_url,
+            model=config.polza_model,
+        )
+
+
+def wrap_text(text: str, max_length: int = 100) -> str:
+    """Разбивает текст на строки."""
     words = text.split(' ')
     lines = []
     current_line = []
 
     for word in words:
-        # Если добавление нового слова превышает лимит, завершаем текущую строку
         if sum(len(w) for w in current_line) + len(word) + len(current_line) > max_length:
             lines.append(' '.join(current_line))
             current_line = []
         current_line.append(word)
 
-    # Добавляем оставшиеся слова
     if current_line:
         lines.append(' '.join(current_line))
 
     return '\n'.join(lines)
 
 
-# === Шаг 1: Извлечение таблиц и текста из PDF ===
-def extract_tables_as_dicts(pdf_path):
-    tables_as_dicts = []
-
-    with pdfplumber.open(pdf_path) as pdf:
-        for page_number, page in enumerate(pdf.pages, start=1):
-            tables = page.extract_tables()
-            for table in tables:
-                headers = table[0]  # Первая строка — заголовки
-                rows = table[1:]  # Остальные строки — данные
-                table_dict = [dict(zip(headers, row)) for row in rows]
-                table_info = {
-                    "page": page_number,
-                    "table": table_dict
-                }
-                tables_as_dicts.append(table_info)
-
-    return tables_as_dicts
-
-
-def extract_text_from_pdf(pdf_path):
-    text = ""
-
-    with pdfplumber.open(pdf_path) as pdf:
-        for page in pdf.pages:
-            # Извлекаем текст, исключая области с таблицами
-            tables = page.find_tables()
-            non_table_text = page.filter(lambda obj: not any(obj.within_bbox(table.bbox) for table in tables))
-            text += non_table_text.extract_text() or ""
-
-    return text
-
-
-# === Шаг 2: Объединение текста и таблиц ===
-def combine_text_and_tables(text, tables_as_dicts):
-    combined_data = []
-
-    if text.strip():
-        combined_data.append({"type": "text", "content": text})
-
-    for table_info in tables_as_dicts:
-        table_text = f"Table from page {table_info['page']}:\n"
-        for row in table_info["table"]:
-            table_text += ", ".join(f"{key}: {value}" for key, value in row.items()) + "\n"
-        combined_data.append({"type": "table", "content": table_text})
-
-    return combined_data
-
-
-# === Шаг 3: Разделение на чанки ===
-def split_into_chunks(combined_data, chunk_size=500, overlap=100):
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=chunk_size,
-        chunk_overlap=overlap
+def main():
+    """Главная функция приложения."""
+    config = load_config()
+    
+    print("=" * 60)
+    print("RAG-система с гибридным поиском (FAISS + BM25)")
+    print("=" * 60)
+    
+    # Шаг 1: Инициализация эмбеддингов
+    print("\n[1/4] Загрузка модели эмбеддингов...")
+    embeddings = QwenEmbeddings(model_path=config.embedding_model_path)
+    
+    # Шаг 2: Загрузка документа
+    print(f"\n[2/4] Загрузка документа: {config.document_path}")
+    try:
+        text = load_markdown_file(config.document_path)
+        chunks = split_into_chunks(text)
+        print(f"Документ разбит на {len(chunks)} чанков")
+    except FileNotFoundError:
+        print(f"Ошибка: Файл {config.document_path} не найден!")
+        sys.exit(1)
+    
+    # Шаг 3: Создание/загрузка гибридного хранилища
+    print(f"\n[3/4] Подготовка гибридного индекса (FAISS + BM25)...")
+    vector_store = get_or_create_vector_store(
+        chunks=chunks,
+        embeddings=embeddings,
+        persist_directory="./faiss_index",
     )
-
-    chunks = []
-    for item in combined_data:
-        content = item["content"]
-        metadata = {"type": item["type"]}
-
-        chunk_texts = splitter.split_text(content)
-        for chunk in chunk_texts:
-            chunks.append({"text": chunk, "metadata": metadata})
-
-    return chunks
-
-
-# === Шаг 4: Создание и сохранение векторного хранилища ===
-def create_and_save_vector_store(chunks, save_path="faiss_index"):
-    embeddings = HuggingFaceEmbeddings(model_name="Qwen/Qwen3-Embedding-8B")
-
-    texts = [chunk["text"] for chunk in chunks]
-    metadatas = [chunk["metadata"] for chunk in chunks]
-
-    vector_store = FAISS.from_texts(texts, embeddings, metadatas=metadatas)
-    vector_store.save_local(save_path)
-    print(f"Векторное хранилище сохранено в '{save_path}'")
-    return vector_store
-
-
-def load_vector_store(load_path="faiss_index"):
-    embeddings = HuggingFaceEmbeddings(model_name="Qwen/Qwen3-Embedding-8B")
-    vector_store = FAISS.load_local(
-        load_path,
-        embeddings,
-        allow_dangerous_deserialization=True
+    
+    # Шаг 4: Настройка LLM провайдера
+    print(f"\n[4/4] Инициализация LLM провайдера...")
+    llm_provider = create_llm_provider(config)
+    
+    # Создаём RAG Chain с настраиваемыми параметрами
+    rag_chain = RAGChain(
+        vector_store=vector_store,
+        llm_provider=llm_provider,
+        top_k=10,
+        vector_weight=0.5,  # 50% вектор, 50% BM25
     )
-    print(f"Векторное хранилище загружено из '{load_path}'")
-    return vector_store
-
-
-# === Шаг 5: Настройка цепочки RAG ===
-def setup_rag_chain(vector_store, api_key):
-    #llm = GoogleGenerativeAI(model="gemini-2.0-pro-exp-02-05", google_api_key=api_key)
-    # llm = GoogleGenerativeAI(model="gemini-2.0-flash-exp", google_api_key=api_key)
-    llm = GoogleGenerativeAI(model="gemini-2.0-flash-thinking-exp-01-21", google_api_key=api_key)
-    qa_chain = RetrievalQA.from_chain_type(
-        llm=llm,
-        chain_type="stuff",
-        retriever=vector_store.as_retriever()
-    )
-    return qa_chain
-
-
-# === Главная функция ===
-def main(pdf_path, api_key):
-    # Шаг 1: Извлечение данных из PDF
-    tables_as_dicts = extract_tables_as_dicts(pdf_path)
-    text = extract_text_from_pdf(pdf_path)
-
-    # Шаг 2: Объединение текста и таблиц
-    combined_data = combine_text_and_tables(text, tables_as_dicts)
-
-    # Шаг 3: Разделение на чанки
-    chunks = split_into_chunks(combined_data)
-
-    # Шаг 4: Создание или загрузка векторного хранилища
-    if not os.path.exists("faiss_index"):
-        vector_store = create_and_save_vector_store(chunks)
-    else:
-        vector_store = load_vector_store()
-
-    # Шаг 5: Настройка цепочки RAG
-    qa_chain = setup_rag_chain(vector_store, api_key)
-
-    # === Интерактивный чат ===
-    print("\n=== Добро пожаловать в интерактивный чат! ===")
-    print("Введите ваш вопрос или `/exit` для выхода.\n")
-
+    
+    # Интерактивный чат
+    print("\n" + "=" * 60)
+    print("Добро пожаловать! Гибридный поиск активен.")
+    print("Команды:")
+    print("  /exit     — выход")
+    print("  /reindex  — пересоздать индекс")
+    print("  /bm25     — только BM25 (ключевой поиск)")
+    print("  /vector   — только векторный поиск")
+    print("  /hybrid   — гибридный поиск (по умолчанию)")
+    print("=" * 60 + "\n")
+    
+    current_mode = "hybrid"
+    
     while True:
-        # Запрос от пользователя
-        query = input("Вы: ")
-
-        # Проверка на команду выхода
-        if query.strip().lower() in ("/exit", "exit", "quit"):
-            print("Система: До свидания!")
-            break
-
-        # Генерация ответа
         try:
-            response = qa_chain.invoke(query)
-
-            # Форматируем ответ
-            if isinstance(response, dict) and "result" in response:
-                result = response["result"]
-
-                # Заменяем \n на реальные переносы строк
-                result = result.replace("\\n", "\n")
-
-                # Если нужно, преобразуем Markdown в HTML
-                result = markdown.markdown(result)
-
-                result = wrap_text(result, max_length=80)
-
-                # Выводим только текстовый результат
-                print(f"Система: {result}")
-            else:
-                print(f"Система: Не удалось получить ответ.")
+            query = input(f"[{current_mode}] Вы: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\nДо свидания!")
+            break
+        
+        if not query:
+            continue
+        
+        if query.lower() in ("/exit", "exit", "quit"):
+            print("До свидания!")
+            break
+        
+        if query.lower() == "/reindex":
+            print("Пересоздание индекса...")
+            vector_store = get_or_create_vector_store(
+                chunks=chunks,
+                embeddings=embeddings,
+                persist_directory="./faiss_index",
+                force_recreate=True,
+            )
+            rag_chain = RAGChain(
+                vector_store=vector_store,
+                llm_provider=llm_provider,
+                top_k=10,
+                vector_weight=0.5 if current_mode == "hybrid" else (1.0 if current_mode == "vector" else 0.0),
+            )
+            print("Индекс пересоздан!\n")
+            continue
+        
+        if query.lower() == "/bm25":
+            current_mode = "bm25"
+            rag_chain.vector_weight = 0.0  # Только BM25
+            print("Режим: только BM25 (ключевой поиск)\n")
+            continue
+        
+        if query.lower() == "/vector":
+            current_mode = "vector"
+            rag_chain.vector_weight = 1.0  # Только векторный
+            print("Режим: только векторный поиск\n")
+            continue
+        
+        if query.lower() == "/hybrid":
+            current_mode = "hybrid"
+            rag_chain.vector_weight = 0.5  # Гибрид
+            print("Режим: гибридный поиск (50/50)\n")
+            continue
+        
+        try:
+            response = rag_chain.invoke(query)
+            result = response.get("result", "Не удалось получить ответ.")
+            result = wrap_text(result)
+            print(f"\nСистема: {result}\n")
         except Exception as e:
-            print(f"Система: Произошла ошибка при обработке запроса: {e}")
+            print(f"\nОшибка: {e}\n")
 
 
-# === Запуск программы ===
 if __name__ == "__main__":
-    # Загрузка переменных из .env
-    load_dotenv()
-
-    # Параметры
-    pdf_path = os.getenv("PDF_PATH", "default_document.pdf")  # Путь к PDF
-    api_key = os.getenv("GOOGLE_API_KEY")  # API-ключ для Google Gemini
-
-    # Запуск
-    main(pdf_path, api_key)
+    main()

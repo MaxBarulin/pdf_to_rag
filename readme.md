@@ -1,47 +1,19 @@
-# RAG-Система с Google Gemini и PDF
+# RAG-система с Qwen3-Embedding-8B
 
-Этот проект реализует систему Retrieval-Augmented Generation (RAG), которая извлекает данные из PDF-документа (включая текст и таблицы), создает векторное хранилище и использует модель **Google Gemini** для генерации ответов на вопросы. Проект работает как интерактивный чат в консоли, что делает взаимодействие удобным и интуитивно понятным.
+Retrieval-Augmented Generation (RAG) система для работы с Markdown-документами.
 
----
+## Возможности
 
-## Содержание
-
-1. [Описание проекта](#описание-проекта)
-2. [Требования](#требования)
-3. [Установка](#установка)
-4. [Использование](#использование)
-5. [Структура проекта](#структура-проекта)
-
----
-
-## Описание проекта
-
-Проект позволяет:
-- Извлекать текст и таблицы из PDF.
-- Преобразовывать таблицы в словари Python.
-- Создавать векторное хранилище для быстрого поиска релевантных фрагментов.
-- Использовать модель **Google Gemini** для генерации ответов на основе данных из PDF.
-- Взаимодействовать с системой через интерактивный чат в консоли.
-
-Поддерживается работа с большими документами, содержащими текст, таблицы и другие структуры.
-
----
-
-## Требования
-
-Для работы с проектом вам потребуется:
-
-- Python 3.8 или выше.
-- Установленный API-ключ для **Google Gemini** (см. [инструкцию](https://ai.google.dev/)).
-- Зависимости, перечисленные в разделе [Установка](#установка).
-
----
+- **Эмбеддинги**: Qwen3-Embedding-8B (локальная модель, CPU)
+- **LLM провайдеры**: 
+  - PolzaAI (облачный, OpenAI-совместимый API)
+  - KoboldCPP (локальный)
+- **Векторное хранилище**: FAISS
+- **Документы**: Markdown (.md)
 
 ## Установка
 
 ### 1. Клонирование репозитория
-
-Склонируйте репозиторий на ваш компьютер:
 
 ```bash
 git clone https://github.com/MaxBarulin/pdf_to_rag.git
@@ -50,124 +22,81 @@ cd pdf_to_rag
 
 ### 2. Создание виртуального окружения
 
-Создайте и активируйте виртуальное окружение:
-
 ```bash
 python -m venv venv
-source venv/bin/activate  # Для Linux/MacOS
-venv\Scripts\activate     # Для Windows
+source venv/bin/activate  # Linux/MacOS
+venv\Scripts\activate     # Windows
 ```
 
 ### 3. Установка зависимостей
-
-Установите все необходимые зависимости:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-Файл `requirements.txt` должен содержать следующие библиотеки:
+### 4. Настройка
 
+Создайте файл `.env` (пример в `.env.example`):
+
+```env
+# LLM Provider: polza или kobold
+LLM_PROVIDER=polza
+
+# PolzaAI
+POLZA_AI_API_KEY=ваш_ключ
+POLZA_AI_BASE_URL=https://polza.ai/api/v1
+POLZA_AI_MODEL=z-ai/glm-4.7-flash
+
+# KoboldCPP (опционально)
+KOBOLD_BASE_URL=http://localhost:5001/v1
+
+# Документ
+DOCUMENT_PATH=Developers_Toolkit.md
+
+# Пути
+EMBEDDING_MODEL_PATH=./embedding_model
+FAISS_INDEX_PATH=./faiss_index
 ```
-langchain
-langchain-community
-langchain-google-genai
-google-generativeai
-faiss-cpu
-sentence-transformers
-pdfplumber
-python-dotenv
-langchain-huggingface
-markdown
-```
-
-Если файла `requirements.txt` нет, установите зависимости вручную:
-
-```bash
-pip install langchain langchain-community langchain-google-genai google-generativeai faiss-cpu sentence-transformers pdfplumber python-dotenv langchain-huggingface markdown
-```
-
-### 4. Настройка API-ключа
-
-Создайте файл `.env` в корневой директории проекта и добавьте туда ваш API-ключ:
-
-```plaintext
-GOOGLE_API_KEY=your_gemini_api_key_here
-PDF_PATH=your_document.pdf
-```
-
-Убедитесь, что вы заменили `your_gemini_api_key_here` на реальный ключ, полученный от Google, и `your_document.pdf` на путь к вашему PDF-файлу.
-
-Добавьте `.env` в `.gitignore`, чтобы он не попал в репозиторий:
-
-```plaintext
-.env
-```
-
----
 
 ## Использование
-
-### 1. Подготовка PDF
-
-Поместите ваш PDF-файл в корневую директорию проекта или укажите путь к нему в файле `.env`.
-
-### 2. Запуск скрипта
-
-Запустите основной скрипт:
 
 ```bash
 python main.py
 ```
 
-### 3. Интерактивный чат
+При первом запуске модель эмбеддингов (~16GB) будет автоматически скачана в `./embedding_model`.
 
-После запуска программы вы увидите приветственное сообщение:
+### Переключение LLM провайдера
 
-```plaintext
-=== Добро пожаловать в интерактивный чат! ===
-Введите ваш вопрос или `/exit` для выхода.
-```
+В `.env`:
+- `LLM_PROVIDER=polza` — использовать PolzaAI (облако)
+- `LLM_PROVIDER=kobold` — использовать KoboldCPP (локально)
 
-Введите ваш вопрос, например:
-
-```plaintext
-Вы: Какие города указаны в таблицах?
-Система: В таблицах указаны следующие города: New York, Los Angeles.
-```
-
-Чтобы завершить работу программы, введите `/exit`.
-
----
+Для KoboldCPP необходимо предварительно запустить сервер.
 
 ## Структура проекта
 
 ```
-rag-pdf/
-├── main.py                # Основной скрипт
-├── .env                   # Файл с API-ключом и настройками
-├── requirements.txt       # Список зависимостей
-└── README.md              # Документация проекта
+pdf_to_rag/
+├── src/
+│   ├── config.py            # Конфигурация
+│   ├── embeddings.py        # Qwen3-Embedding-8B
+│   ├── document_loader.py   # Загрузка .md файлов
+│   ├── vector_store.py      # FAISS
+│   ├── rag_chain.py         # RAG pipeline
+│   └── llm_providers/
+│       ├── base.py          # Базовый класс
+│       ├── polza.py         # PolzaAI
+│       └── kobold.py        # KoboldCPP
+├── embedding_model/         # Локальная модель (создаётся автоматически)
+├── faiss_index/             # Векторный индекс
+├── main.py                  # Точка входа
+├── requirements.txt
+└── README.md
 ```
 
----
+## Требования
 
-## Дополнительная информация
-
-### 1. Безопасность
-- Не передавайте файл `.env` другим людям.
-- Убедитесь, что файл `.env` добавлен в `.gitignore`.
-
-### 2. Работа с таблицами
-Если таблицы в PDF имеют сложную структуру, их извлечение может потребовать дополнительной настройки.
-
-### 3. Большие документы
-Для больших PDF рекомендуется использовать облачное хранилище для векторного индекса.
-
----
-
-Если у вас возникнут вопросы или проблемы, свяжитесь со мной:
-- Email: Barulin.max@gmail.com
-- GitHub: [MaxBarulin](https://github.com/MaxBarulin)
-
----
+- Python 3.8+
+- ~16GB свободного места (для модели эмбеддингов)
+- Рекомендуется: 32GB RAM для CPU-инференса 8B модели
