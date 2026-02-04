@@ -103,7 +103,7 @@ def split_into_chunks(combined_data, chunk_size=500, overlap=100):
 
 # === Шаг 4: Создание и сохранение векторного хранилища ===
 def create_and_save_vector_store(chunks, save_path="faiss_index"):
-    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    embeddings = HuggingFaceEmbeddings(model_name="Qwen/Qwen3-Embedding-8B")
 
     texts = [chunk["text"] for chunk in chunks]
     metadatas = [chunk["metadata"] for chunk in chunks]
@@ -115,7 +115,7 @@ def create_and_save_vector_store(chunks, save_path="faiss_index"):
 
 
 def load_vector_store(load_path="faiss_index"):
-    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    embeddings = HuggingFaceEmbeddings(model_name="Qwen/Qwen3-Embedding-8B")
     vector_store = FAISS.load_local(
         load_path,
         embeddings,
