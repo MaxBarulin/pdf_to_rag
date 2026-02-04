@@ -169,5 +169,5 @@ rag-pdf/
 Если у вас возникнут вопросы или проблемы, свяжитесь со мной:
 - Email: Barulin.max@gmail.com
 - GitHub: [MaxBarulin](https://github.com/MaxBarulin)
-
+- лицензия: MIT
 ---
